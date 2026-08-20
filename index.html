@@ -130,9 +130,9 @@ async function loadChannel(ref){
   const name = ch.items[0].snippet.title;
   const uploads = ch.items[0].contentDetails.relatedPlaylists.uploads;
   const all = []; let page = "";
-  // Тянем максимум 5 страниц по 50 — 250 свежих видео. Дальше листать
-  // в телефоне всё равно невозможно, а квоту бережём.
-  for (let i = 0; i < 5; i++){
+  // 40 страниц по 50 — до 2000 видео. Больше почти не бывает,
+  // а квоты это стоит копейки: одна страница — одна единица из 10 000 в сутки.
+  for (let i = 0; i < 40; i++){
     const r = await api("playlistItems", {part: "snippet", playlistId: uploads,
                                           maxResults: 50, pageToken: page});
     for (const it of r.items || []){
@@ -345,6 +345,7 @@ function screenProgress(st){
   show(`<div class="mid">
       <div class="big">${st.done}<span style="color:var(--hint)">/${st.total}</span></div>
       <div class="cap2">скачано ${st.ok}${st.fail ? ` · без субтитров ${st.fail}` : ""}</div>
+      ${st.now ? `<div class="cap2" style="margin-top:12px;opacity:.75">${esc(st.now)}</div>` : ""}
     </div>
     <div style="height:26px"></div>
     <div class="bar2"><i style="width:${pct}%"></i></div>
