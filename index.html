@@ -56,10 +56,14 @@
   @keyframes r{to{transform:rotate(360deg)}}
   .bar2{margin:0 24px;height:10px;border-radius:5px;background:var(--chip);overflow:hidden}
   .bar2 i{display:block;height:100%;background:var(--acc);width:0;transition:width .35s}
-  .mid{text-align:center;padding:56px 20px 0}
+  .mid{text-align:center;padding:20px}
+  .fill{display:flex;flex-direction:column;justify-content:center;align-items:stretch;
+        min-height:calc(100dvh - 96px)}
   .mid .big{font-size:52px;font-weight:700;line-height:1.05;letter-spacing:-1px}
   .mid .cap2{margin-top:8px;color:var(--hint);font-size:14px}
   .mid .tick{font-size:44px;color:#3fb950;line-height:1}
+  .nowpic{display:block;margin:20px auto 0;width:200px;max-width:70%;aspect-ratio:16/9;
+          object-fit:cover;border-radius:10px;background:var(--chip)}
   .fails{margin:26px 14px 0}
   .fails .h{color:var(--hint);font-size:12px;margin:0 0 6px 2px}
   .fails .card{padding:0}
@@ -342,14 +346,16 @@ let jobId = null, poller = null;
 function screenProgress(st){
   const pct = st.total ? Math.round(st.done / st.total * 100) : 0;
   setBar("", false); setBack(false);
-  show(`<div class="mid">
+  show(`<div class="fill"><div class="mid">
       <div class="big">${st.done}<span style="color:var(--hint)">/${st.total}</span></div>
-      <div class="cap2">скачано ${st.ok}${st.fail ? ` · без субтитров ${st.fail}` : ""}</div>
-      ${st.now ? `<div class="cap2" style="margin-top:12px;opacity:.75">${esc(st.now)}</div>` : ""}
+      <div class="cap2">проверено${st.fail ? ` · с субтитрами ${st.ok} · без ${st.fail}` : `, все с субтитрами`}</div>
+      ${st.now_id ? `<img class="nowpic" src="https://i.ytimg.com/vi/${esc(st.now_id)}/mqdefault.jpg" alt="">` : ""}
+      ${st.now ? `<div class="cap2" style="margin-top:${st.now_id ? 8 : 12}px;opacity:.8">${esc(st.now)}</div>` : ""}
     </div>
     <div style="height:26px"></div>
     <div class="bar2"><i style="width:${pct}%"></i></div>
-    <button class="btn" id="stop" style="background:var(--chip);color:var(--hint)">Остановить</button>`);
+    <button class="btn" id="stop" style="background:var(--chip);color:var(--hint)">Остановить</button>
+    </div>`);
   document.getElementById("stop").onclick = async () => {
     try { await fetch(`${API}/stop?job=${jobId}`); } catch(e){}
   };
@@ -361,7 +367,7 @@ function screenDone(st){
     const a = n % 10, b = n % 100;
     return (a === 1 && b !== 11) ? "видео" : "видео";
   };
-  show(`<div class="mid">
+  show(`<div class="${st.no_subs?.length ? "" : "fill"}"><div class="mid">
       <div class="tick">✓</div>
       <div class="big" style="margin-top:10px">${st.ok}</div>
       <div class="cap2">${word(st.ok)} с субтитрами${st.fail ? ` · не вышло ${st.fail}` : ""}</div>
@@ -372,7 +378,7 @@ function screenDone(st){
         <img src="https://i.ytimg.com/vi/${esc(v.id || v)}/mqdefault.jpg" alt="" loading="lazy">
         <div class="meta"><div class="nm">${esc(v.title || v)}</div></div>
       </div>`).join("")}</div>
-    </div>` : ""}`);
+    </div>` : ""}</div>`);
   setBar("Забрать субтитры", st.ok > 0);
   go.onclick = () => {
     const url = `${API}/file?job=${jobId}&name=${encodeURIComponent(fileName())}`;
