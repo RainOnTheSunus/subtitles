@@ -54,6 +54,9 @@
   .spin{margin:28px auto;width:26px;height:26px;border:2.5px solid var(--chip);
         border-top-color:var(--acc);border-radius:50%;animation:r .8s linear infinite}
   @keyframes r{to{transform:rotate(360deg)}}
+  .bar2{margin:0 14px;height:8px;border-radius:4px;background:var(--chip);overflow:hidden}
+  .bar2 i{display:block;height:100%;background:var(--acc);width:0;transition:width .35s}
+  .big{margin:18px 14px 4px;font-size:28px;font-weight:600}
   .hide{display:none}
 </style>
 
@@ -62,6 +65,7 @@
 
 <script>
 const KEY = "AIzaSyCbyV0XHj7wqp2-Ls7iuHrSfDFWCpKQHaU";
+const API = new URLSearchParams(location.search).get("api") || "";
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
 
@@ -73,9 +77,19 @@ let videos = [];          // [{id,title,date}]
 let picked = new Set();
 let lang = "auto";
 let filter = "";
+let kind = "all";   // all | video | short | stream
+
+const KINDS = [["all","Все"],["video","Видео"],["short","Shorts"],["stream","Трансляции"]];
 
 const esc = s => String(s).replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
 const show = html => { app.innerHTML = html; };
+function setBack(on){
+  const b = tg?.BackButton;
+  if (!b) return;
+  on ? b.show() : b.hide();
+}
+tg?.BackButton?.onClick(() => screenStart());
+
 const setBar = (text, on) => {
   bar.classList.toggle("hide", !text);
   go.textContent = text || "";
@@ -123,8 +137,36 @@ async function loadChannel(ref){
     }
     page = r.nextPageToken; if (!page) break;
   }
+  await addKinds(all);
   return {name, videos: all};
 }
+// Тип (видео / shorts / трансляция) в списке плейлиста не приходит —
+// добираем его пачками по 50, это дёшево по квоте.
+async function addKinds(list){
+  for (let i = 0; i < list.length; i += 50){
+    const part = list.slice(i, i + 50);
+    const r = await api("videos", {part: "contentDetails,liveStreamingDetails",
+                                   id: part.map(v => v.id).join(",")});
+    const by = {};
+    for (const it of r.items || []) by[it.id] = it;
+    for (const v of part){
+      const it = by[v.id];
+      const sec = iso2sec(it?.contentDetails?.duration || "");
+      v.kind = it?.liveStreamingDetails ? "stream" : (sec && sec <= 180 ? "short" : "video");
+      v.len  = sec ? fmtLen(sec) : "";
+    }
+  }
+}
+function iso2sec(d){
+  const m = d.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  return m ? (+m[1]||0)*3600 + (+m[2]||0)*60 + (+m[3]||0) : 0;
+}
+function fmtLen(s){
+  const h = Math.floor(s/3600), m = Math.floor(s%3600/60), x = s%60;
+  return h ? `${h}:${String(m).padStart(2,"0")}:${String(x).padStart(2,"0")}`
+           : `${m}:${String(x).padStart(2,"0")}`;
+}
+
 async function loadVideos(ids){
   const r = await api("videos", {part: "snippet", id: ids.join(",")});
   return (r.items || []).map(it => ({
@@ -135,13 +177,11 @@ async function loadVideos(ids){
 
 // ── Экраны ───────────────────────────────────────────────────────
 function screenStart(){
-  setBar("", false);
+  setBar("", false); setBack(false);
+  picked = new Set(); videos = []; filter = ""; kind = "all";
   show(`<h1>Субтитры</h1>
-    <p class="sub">одно видео, несколько ссылок или канал</p>
-    <div class="cap">Ссылка</div>
-    <div class="card"><input id="url" placeholder="Вставьте ссылку с YouTube…"
+    <div class="card"><input id="url" placeholder="Ссылка на видео или канал"
       autocapitalize="off" autocorrect="off" spellcheck="false"></div>
-    <p class="note">Можно несколько ссылок сразу — каждую с новой строки.</p>
     <button class="btn" id="next">Дальше</button>`);
   const url = document.getElementById("url");
   document.getElementById("next").onclick = () => handle(url.value.trim());
@@ -149,25 +189,25 @@ function screenStart(){
 }
 
 function screenLoading(text){
-  setBar("", false);
+  setBar("", false); setBack(true);
   show(`<h1>${esc(text)}</h1><div class="spin"></div>`);
 }
 
 function screenError(msg){
-  setBar("", false);
+  setBar("", false); setBack(true);
   show(`<h1>Не получилось</h1><div class="err">${esc(msg)}</div>
         <button class="btn" id="back">Назад</button>`);
   document.getElementById("back").onclick = screenStart;
 }
 
 function langBlock(){
-  return `<div class="cap">Язык субтитров</div>
+  return `<div class="cap">Язык</div>
     <div class="card"><div class="seg" id="lang">
       <button data-l="auto" class="on">Авто</button>
       <button data-l="ru">Русский</button>
       <button data-l="en">Английский</button>
     </div></div>
-    <p class="note">Авто — сначала ищем русские, если их нет, берём английские.</p>`;
+`;
 }
 function bindLang(){
   document.getElementById("lang").onclick = e => {
@@ -178,31 +218,36 @@ function bindLang(){
 }
 
 function screenSingle(v){
-  show(`<h1>Одно видео</h1><p class="sub">проверьте, что ссылка та</p>
-    <div class="cap">Найдено</div>
+  show(`<h1>Одно видео</h1>
     <div class="card"><div class="it">
       <img src="https://i.ytimg.com/vi/${v.id}/mqdefault.jpg" alt="">
       <div class="meta"><div class="nm">${esc(v.title)}</div><div class="dt">${esc(v.date)}</div></div>
     </div></div>
     ${langBlock()}`);
-  bindLang();
+  bindLang(); setBack(true);
   picked = new Set([v.id]);
   setBar("Скачать субтитры", true);
 }
 
 function screenList(title, sub){
-  const vis = videos.filter(v => !filter || v.title.toLowerCase().includes(filter));
+  const vis = videos.filter(v =>
+    (kind === "all" || v.kind === kind) &&
+    (!filter || v.title.toLowerCase().includes(filter)));
   const rows = vis.map(v => `<div class="it" data-id="${v.id}">
       <img src="https://i.ytimg.com/vi/${v.id}/mqdefault.jpg" alt="" loading="lazy">
-      <div class="meta"><div class="nm">${esc(v.title)}</div><div class="dt">${esc(v.date)}</div></div>
+      <div class="meta"><div class="nm">${esc(v.title)}</div>
+        <div class="dt">${esc(v.date)}${v.len ? " · " + v.len : ""}</div></div>
       <div class="ck ${picked.has(v.id) ? "on" : ""}"></div>
     </div>`).join("") || `<div class="it"><div class="meta"><div class="dt">Ничего не нашлось</div></div></div>`;
 
   show(`<h1>${esc(title)}</h1><p class="sub">${esc(sub)}</p>
-    <div class="cap">Поиск по названию</div>
-    <div class="card"><input id="q" placeholder="Например: godot" value="${esc(filter)}"
+    <div class="card"><input id="q" placeholder="Поиск" value="${esc(filter)}"
       autocapitalize="off" autocorrect="off" spellcheck="false"></div>
     <div class="cap">Выбрано: ${picked.size}</div>
+    <div class="tools" id="kinds">
+      ${KINDS.map(k => `<button data-k="${k[0]}" class="${kind === k[0] ? "on" : ""}">${k[1]}${
+        k[0] === "all" ? "" : ` ${videos.filter(v => v.kind === k[0]).length}`}</button>`).join("")}
+    </div>
     <div class="tools">
       <button id="all">Выбрать все</button>
       <button id="none">Снять всё</button>
@@ -213,6 +258,10 @@ function screenList(title, sub){
   q.oninput = () => { filter = q.value.trim().toLowerCase(); screenList(title, sub);
                       const n = document.getElementById("q"); n.focus();
                       n.setSelectionRange(n.value.length, n.value.length); };
+  document.getElementById("kinds")?.addEventListener("click", e => {
+    const b = e.target.closest("button[data-k]"); if (!b) return;
+    kind = b.dataset.k; screenList(title, sub);
+  });
   document.getElementById("all").onclick  = () => { vis.forEach(v => picked.add(v.id)); screenList(title, sub); };
   document.getElementById("none").onclick = () => { vis.forEach(v => picked.delete(v.id)); screenList(title, sub); };
   document.getElementById("list").onclick = e => {
@@ -225,6 +274,7 @@ function screenList(title, sub){
     tg?.HapticFeedback?.selectionChanged?.();
   };
   setBar(`Скачать субтитры · ${picked.size}`, picked.size > 0);
+  setBack(true);
 }
 
 // ── Разбор того, что вставили ────────────────────────────────────
@@ -258,14 +308,79 @@ async function handle(text){
 
 // ── Отправка боту ────────────────────────────────────────────────
 go.onclick = () => {
-  const ids = [...picked];
-  if (!ids.length) return;
-  // 4096 байт — предел Telegram. 11 символов на id плюс запятая: ~340 штук.
-  const payload = {v: 1, lang, ids: ids.slice(0, 330)};
+  const chosen = videos.filter(v => picked.has(v.id));
+  const list = chosen.length ? chosen : [...picked].map(id => ({id, title: id}));
+  if (!list.length) return;
   tg?.HapticFeedback?.impactOccurred?.("medium");
-  if (tg?.sendData) tg.sendData(JSON.stringify(payload));
-  else alert("Открой это через кнопку в боте — только так он получит выбор.");
+  if (API) return runJob(list);
+  // Запасной путь: бот недоступен — отдаём выбор через Telegram и закрываемся.
+  if (tg?.sendData) tg.sendData(JSON.stringify({v: 1, lang, ids: list.map(v => v.id).slice(0, 330)}));
+  else screenError("Бот сейчас недоступен. Похоже, компьютер выключен.");
 };
+
+// ── Работа через бота: окно остаётся открытым ────────────────────
+let jobId = null, poller = null;
+
+function screenProgress(st){
+  const pct = st.total ? Math.round(st.done / st.total * 100) : 0;
+  setBar("", false); setBack(false);
+  show(`<h1>Скачиваю субтитры</h1>
+    <div class="big">${st.done} из ${st.total}</div>
+    <p class="sub">готово ${st.ok}${st.fail ? ` · без субтитров ${st.fail}` : ""}</p>
+    <div style="height:14px"></div>
+    <div class="bar2"><i style="width:${pct}%"></i></div>
+    <button class="btn" id="stop" style="background:var(--chip);color:var(--hint)">Остановить</button>`);
+  document.getElementById("stop").onclick = async () => {
+    try { await fetch(`${API}/stop?job=${jobId}`); } catch(e){}
+  };
+}
+
+function screenDone(st){
+  setBack(true);
+  show(`<h1>Готово</h1>
+    <div class="big">${st.ok}</div>
+    <p class="sub">${st.ok === 1 ? "видео" : "видео"}${st.fail ? ` · без субтитров ${st.fail}` : ""}</p>
+    ${st.no_subs?.length ? `<div class="cap">Без субтитров</div><div class="card">${
+      st.no_subs.map(t => `<div class="it"><div class="meta"><div class="nm">${esc(t)}</div></div></div>`).join("")
+    }</div>` : ""}`);
+  setBar("Забрать субтитры", st.ok > 0);
+  go.onclick = () => {
+    const url = `${API}/file?job=${jobId}&name=${encodeURIComponent(fileName())}`;
+    if (tg?.downloadFile) tg.downloadFile({url, file_name: fileName() + ".txt"});
+    else if (tg?.openLink) tg.openLink(url);
+    else location.href = url;
+  };
+}
+
+function fileName(){
+  return "Субтитры_" + new Date().toISOString().slice(0,10);
+}
+
+async function runJob(list){
+  screenProgress({done: 0, total: list.length, ok: 0, fail: 0});
+  try {
+    const r = await fetch(`${API}/start`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({lang, videos: list.map(v => ({id: v.id, title: v.title}))}),
+    });
+    const j = await r.json();
+    if (!j.job) throw new Error(j.error || "бот не принял задачу");
+    jobId = j.job;
+  } catch(e){
+    return screenError("Не достучался до бота. Закройте окно, отправьте боту /start и откройте заново — адрес мог смениться.");
+  }
+  clearInterval(poller);
+  poller = setInterval(async () => {
+    try {
+      const st = await (await fetch(`${API}/status?job=${jobId}`)).json();
+      if (st.error) throw new Error(st.error);
+      st.ready ? (clearInterval(poller), screenDone(st)) : screenProgress(st);
+    } catch(e){
+      clearInterval(poller);
+      screenError("Связь с ботом оборвалась. Файл мог остаться у бота — попробуйте ещё раз.");
+    }
+  }, 1500);
+}
 
 screenStart();
 </script>
