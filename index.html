@@ -54,9 +54,15 @@
   .spin{margin:28px auto;width:26px;height:26px;border:2.5px solid var(--chip);
         border-top-color:var(--acc);border-radius:50%;animation:r .8s linear infinite}
   @keyframes r{to{transform:rotate(360deg)}}
-  .bar2{margin:0 14px;height:8px;border-radius:4px;background:var(--chip);overflow:hidden}
+  .bar2{margin:0 24px;height:10px;border-radius:5px;background:var(--chip);overflow:hidden}
   .bar2 i{display:block;height:100%;background:var(--acc);width:0;transition:width .35s}
-  .big{margin:18px 14px 4px;font-size:28px;font-weight:600}
+  .mid{text-align:center;padding:56px 20px 0}
+  .mid .big{font-size:52px;font-weight:700;line-height:1.05;letter-spacing:-1px}
+  .mid .cap2{margin-top:8px;color:var(--hint);font-size:14px}
+  .mid .tick{font-size:44px;color:#3fb950;line-height:1}
+  .fails{margin:26px 14px 0}
+  .fails .h{color:var(--hint);font-size:12px;margin:0 0 6px 2px}
+  .fails .card{padding:0}
   .hide{display:none}
 </style>
 
@@ -245,7 +251,12 @@ function screenList(title, sub){
   show(`<h1>${esc(title)}</h1><p class="sub">${esc(sub)}</p>
     <div class="card"><input id="q" placeholder="Поиск" value="${esc(filter)}"
       autocapitalize="off" autocorrect="off" spellcheck="false"></div>
-    <div class="cap" id="cnt">Выбрано: ${picked.size}</div>
+    <div class="cap" id="cnt">${(() => {
+      const here = vis.filter(v => picked.has(v.id)).length;
+      return picked.size > here
+        ? `Выбрано: ${picked.size} · на этой вкладке ${here}`
+        : `Выбрано: ${picked.size}`;
+    })()}</div>
     <div class="tools" id="kinds">
       ${KINDS.map(k => `<button data-k="${k[0]}" class="${kind === k[0] ? "on" : ""}">${k[1]}${
         k[0] === "all" ? "" : ` ${videos.filter(v => v.kind === k[0]).length}`}</button>`).join("")}
@@ -265,13 +276,16 @@ function screenList(title, sub){
     kind = b.dataset.k; screenList(title, sub);
   });
   document.getElementById("all").onclick  = () => { vis.forEach(v => picked.add(v.id)); screenList(title, sub); };
-  document.getElementById("none").onclick = () => { vis.forEach(v => picked.delete(v.id)); screenList(title, sub); };
+  document.getElementById("none").onclick = () => { picked.clear(); screenList(title, sub); };
   document.getElementById("list").onclick = e => {
     const row = e.target.closest(".it[data-id]"); if (!row) return;
     const id = row.dataset.id;
     picked.has(id) ? picked.delete(id) : picked.add(id);
     row.querySelector(".ck").classList.toggle("on", picked.has(id));
-    document.getElementById("cnt").textContent = "Выбрано: " + picked.size;
+    const here = vis.filter(v => picked.has(v.id)).length;
+    document.getElementById("cnt").textContent = picked.size > here
+      ? `Выбрано: ${picked.size} · на этой вкладке ${here}`
+      : `Выбрано: ${picked.size}`;
     setBar(`Скачать субтитры · ${picked.size}`, picked.size > 0);
     tg?.HapticFeedback?.selectionChanged?.();
   };
@@ -328,10 +342,11 @@ let jobId = null, poller = null;
 function screenProgress(st){
   const pct = st.total ? Math.round(st.done / st.total * 100) : 0;
   setBar("", false); setBack(false);
-  show(`<h1>Скачиваю субтитры</h1>
-    <div class="big">${st.done} из ${st.total}</div>
-    <p class="sub">готово ${st.ok}${st.fail ? ` · без субтитров ${st.fail}` : ""}</p>
-    <div style="height:14px"></div>
+  show(`<div class="mid">
+      <div class="big">${st.done}<span style="color:var(--hint)">/${st.total}</span></div>
+      <div class="cap2">скачано ${st.ok}${st.fail ? ` · без субтитров ${st.fail}` : ""}</div>
+    </div>
+    <div style="height:26px"></div>
     <div class="bar2"><i style="width:${pct}%"></i></div>
     <button class="btn" id="stop" style="background:var(--chip);color:var(--hint)">Остановить</button>`);
   document.getElementById("stop").onclick = async () => {
@@ -341,12 +356,22 @@ function screenProgress(st){
 
 function screenDone(st){
   setBack(true);
-  show(`<h1>Готово</h1>
-    <div class="big">${st.ok}</div>
-    <p class="sub">${st.ok === 1 ? "видео" : "видео"}${st.fail ? ` · без субтитров ${st.fail}` : ""}</p>
-    ${st.no_subs?.length ? `<div class="cap">Без субтитров</div><div class="card">${
-      st.no_subs.map(t => `<div class="it"><div class="meta"><div class="nm">${esc(t)}</div></div></div>`).join("")
-    }</div>` : ""}`);
+  const word = n => {
+    const a = n % 10, b = n % 100;
+    return (a === 1 && b !== 11) ? "видео" : "видео";
+  };
+  show(`<div class="mid">
+      <div class="tick">✓</div>
+      <div class="big" style="margin-top:10px">${st.ok}</div>
+      <div class="cap2">${word(st.ok)} с субтитрами${st.fail ? ` · не вышло ${st.fail}` : ""}</div>
+    </div>
+    ${st.no_subs?.length ? `<div class="fails">
+      <p class="h">Без субтитров${st.fail > st.no_subs.length ? ` (первые ${st.no_subs.length} из ${st.fail})` : ""}</p>
+      <div class="card">${st.no_subs.map(v => `<div class="it">
+        <img src="https://i.ytimg.com/vi/${esc(v.id || v)}/mqdefault.jpg" alt="" loading="lazy">
+        <div class="meta"><div class="nm">${esc(v.title || v)}</div></div>
+      </div>`).join("")}</div>
+    </div>` : ""}`);
   setBar("Забрать субтитры", st.ok > 0);
   go.onclick = () => {
     const url = `${API}/file?job=${jobId}&name=${encodeURIComponent(fileName())}`;
