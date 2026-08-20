@@ -77,7 +77,7 @@ let videos = [];          // [{id,title,date}]
 let picked = new Set();
 let lang = "auto";
 let filter = "";
-let kind = "all";   // all | video | short | stream
+let kind = "video";   // video | short | stream | all
 
 const KINDS = [["all","Все"],["video","Видео"],["short","Shorts"],["stream","Трансляции"]];
 
@@ -178,7 +178,7 @@ async function loadVideos(ids){
 // ── Экраны ───────────────────────────────────────────────────────
 function screenStart(){
   setBar("", false); setBack(false);
-  picked = new Set(); videos = []; filter = ""; kind = "all";
+  picked = new Set(); videos = []; filter = ""; kind = "video";
   show(`<h1>Субтитры</h1>
     <div class="card"><input id="url" placeholder="Ссылка на видео или канал"
       autocapitalize="off" autocorrect="off" spellcheck="false"></div>
@@ -225,7 +225,9 @@ function screenSingle(v){
     </div></div>
     ${langBlock()}`);
   bindLang(); setBack(true);
+  videos = [v];
   picked = new Set([v.id]);
+  go.onclick = startDownload;
   setBar("Скачать субтитры", true);
 }
 
@@ -243,7 +245,7 @@ function screenList(title, sub){
   show(`<h1>${esc(title)}</h1><p class="sub">${esc(sub)}</p>
     <div class="card"><input id="q" placeholder="Поиск" value="${esc(filter)}"
       autocapitalize="off" autocorrect="off" spellcheck="false"></div>
-    <div class="cap">Выбрано: ${picked.size}</div>
+    <div class="cap" id="cnt">Выбрано: ${picked.size}</div>
     <div class="tools" id="kinds">
       ${KINDS.map(k => `<button data-k="${k[0]}" class="${kind === k[0] ? "on" : ""}">${k[1]}${
         k[0] === "all" ? "" : ` ${videos.filter(v => v.kind === k[0]).length}`}</button>`).join("")}
@@ -269,10 +271,11 @@ function screenList(title, sub){
     const id = row.dataset.id;
     picked.has(id) ? picked.delete(id) : picked.add(id);
     row.querySelector(".ck").classList.toggle("on", picked.has(id));
-    document.querySelectorAll(".cap")[1].textContent = "Выбрано: " + picked.size;
+    document.getElementById("cnt").textContent = "Выбрано: " + picked.size;
     setBar(`Скачать субтитры · ${picked.size}`, picked.size > 0);
     tg?.HapticFeedback?.selectionChanged?.();
   };
+  go.onclick = startDownload;
   setBar(`Скачать субтитры · ${picked.size}`, picked.size > 0);
   setBack(true);
 }
@@ -307,7 +310,7 @@ async function handle(text){
 }
 
 // ── Отправка боту ────────────────────────────────────────────────
-go.onclick = () => {
+function startDownload(){
   const chosen = videos.filter(v => picked.has(v.id));
   const list = chosen.length ? chosen : [...picked].map(id => ({id, title: id}));
   if (!list.length) return;
@@ -316,7 +319,8 @@ go.onclick = () => {
   // Запасной путь: бот недоступен — отдаём выбор через Telegram и закрываемся.
   if (tg?.sendData) tg.sendData(JSON.stringify({v: 1, lang, ids: list.map(v => v.id).slice(0, 330)}));
   else screenError("Бот сейчас недоступен. Похоже, компьютер выключен.");
-};
+}
+go.onclick = startDownload;
 
 // ── Работа через бота: окно остаётся открытым ────────────────────
 let jobId = null, poller = null;
