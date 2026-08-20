@@ -1,0 +1,271 @@
+<!-- Мини-приложение для бота @youtable_bot: выбор видео перед выгрузкой субтитров.
+     Список и превью берём прямо у YouTube, боту отдаём только выбор. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Субтитры</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg: var(--tg-theme-bg-color, #17212b);
+    --card: var(--tg-theme-secondary-bg-color, #232e3c);
+    --text: var(--tg-theme-text-color, #fff);
+    --hint: var(--tg-theme-hint-color, #8b9aa9);
+    --acc: var(--tg-theme-button-color, #2f8fed);
+    --sep: rgba(128,140,155,.22);
+    --chip: rgba(128,140,155,.16);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--text);padding:0 0 84px;
+       font:15px/1.3 -apple-system,"SF Pro Text","Helvetica Neue",Roboto,sans-serif}
+  h1{margin:0;font-size:17px;font-weight:600;padding:16px 14px 2px}
+  .sub{margin:0;padding:0 14px;color:var(--hint);font-size:12px}
+  .cap{margin:16px 14px 5px;color:var(--hint);font-size:12px}
+  .card{margin:0 14px;background:var(--card);border-radius:11px;overflow:hidden}
+  input{width:100%;border:0;outline:0;background:transparent;color:var(--text);
+        font:15px/1.3 inherit;padding:12px 13px}
+  input::placeholder{color:var(--hint)}
+  .note{margin:8px 14px 0;color:var(--hint);font-size:12px;line-height:1.4}
+  .btn{margin:16px 14px 0;border:0;width:calc(100% - 28px);border-radius:10px;padding:13px;
+       background:var(--acc);color:#fff;font:600 15px/1 inherit}
+  .btn[disabled]{opacity:.45}
+  .tools{display:flex;gap:6px;padding:0 14px 8px;flex-wrap:wrap}
+  .tools button{border:0;padding:7px 12px;border-radius:8px;background:var(--chip);
+                color:var(--hint);font:12px/1 inherit}
+  .tools button.on{background:var(--acc);color:#fff;font-weight:600}
+  .it{display:flex;gap:10px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--sep)}
+  .it:last-child{border-bottom:none}
+  .it img{width:76px;height:43px;border-radius:6px;object-fit:cover;flex:none;background:#000}
+  .meta{flex:1;min-width:0}
+  .nm{font-size:13px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;
+      -webkit-box-orient:vertical;overflow:hidden}
+  .dt{color:var(--hint);font-size:11px;margin-top:3px}
+  .ck{width:21px;height:21px;border-radius:50%;border:1.5px solid var(--hint);flex:none}
+  .ck.on{background:var(--acc);border-color:var(--acc);position:relative}
+  .ck.on::after{content:"";position:absolute;left:7px;top:3px;width:5px;height:10px;
+      border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+  .seg{display:flex;gap:6px;padding:10px 11px}
+  .seg button{flex:1;border:0;padding:8px 0;border-radius:8px;background:var(--chip);
+              color:var(--hint);font:13px/1 inherit}
+  .seg button.on{background:var(--acc);color:#fff;font-weight:600}
+  .bar{position:fixed;left:0;right:0;bottom:0;background:var(--bg);
+       padding:8px 0 max(16px, env(safe-area-inset-bottom))}
+  .err{margin:14px;padding:12px 13px;border-radius:10px;background:rgba(255,69,58,.15);
+       color:#ff6b60;font-size:13px}
+  .spin{margin:28px auto;width:26px;height:26px;border:2.5px solid var(--chip);
+        border-top-color:var(--acc);border-radius:50%;animation:r .8s linear infinite}
+  @keyframes r{to{transform:rotate(360deg)}}
+  .hide{display:none}
+</style>
+
+<div id="app"></div>
+<div class="bar hide" id="bar"><button class="btn" id="go"></button></div>
+
+<script>
+const KEY = "AIzaSyCbyV0XHj7wqp2-Ls7iuHrSfDFWCpKQHaU";
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+
+const app = document.getElementById("app");
+const bar = document.getElementById("bar");
+const go  = document.getElementById("go");
+
+let videos = [];          // [{id,title,date}]
+let picked = new Set();
+let lang = "auto";
+let filter = "";
+
+const esc = s => String(s).replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+const show = html => { app.innerHTML = html; };
+const setBar = (text, on) => {
+  bar.classList.toggle("hide", !text);
+  go.textContent = text || "";
+  go.disabled = !on;
+};
+
+// ── Разбор ссылки ────────────────────────────────────────────────
+function videoIds(text){
+  const re = /(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/g;
+  const out = []; let m;
+  while ((m = re.exec(text))) if (!out.includes(m[1])) out.push(m[1]);
+  return out;
+}
+function channelRef(text){
+  let m = text.match(/youtube\.com\/@([^/\s?#]+)/); if (m) return {handle: m[1]};
+  m = text.match(/youtube\.com\/channel\/([^/\s?#]+)/); if (m) return {id: m[1]};
+  return null;
+}
+
+// ── Запросы к YouTube ────────────────────────────────────────────
+async function api(path, params){
+  const q = new URLSearchParams({...params, key: KEY});
+  const r = await fetch(`https://www.googleapis.com/youtube/v3/${path}?${q}`);
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message || "YouTube отказал");
+  return j;
+}
+async function loadChannel(ref){
+  const p = ref.handle ? {forHandle: ref.handle} : {id: ref.id};
+  const ch = await api("channels", {part: "contentDetails,snippet", ...p});
+  if (!ch.items?.length) throw new Error("Канал не найден");
+  const name = ch.items[0].snippet.title;
+  const uploads = ch.items[0].contentDetails.relatedPlaylists.uploads;
+  const all = []; let page = "";
+  // Тянем максимум 5 страниц по 50 — 250 свежих видео. Дальше листать
+  // в телефоне всё равно невозможно, а квоту бережём.
+  for (let i = 0; i < 5; i++){
+    const r = await api("playlistItems", {part: "snippet", playlistId: uploads,
+                                          maxResults: 50, pageToken: page});
+    for (const it of r.items || []){
+      const s = it.snippet;
+      if (!s.resourceId?.videoId) continue;
+      all.push({id: s.resourceId.videoId, title: s.title,
+                date: (s.publishedAt || "").slice(0,10).split("-").reverse().join(".")});
+    }
+    page = r.nextPageToken; if (!page) break;
+  }
+  return {name, videos: all};
+}
+async function loadVideos(ids){
+  const r = await api("videos", {part: "snippet", id: ids.join(",")});
+  return (r.items || []).map(it => ({
+    id: it.id, title: it.snippet.title,
+    date: (it.snippet.publishedAt || "").slice(0,10).split("-").reverse().join(".")
+  }));
+}
+
+// ── Экраны ───────────────────────────────────────────────────────
+function screenStart(){
+  setBar("", false);
+  show(`<h1>Субтитры</h1>
+    <p class="sub">одно видео, несколько ссылок или канал</p>
+    <div class="cap">Ссылка</div>
+    <div class="card"><input id="url" placeholder="Вставьте ссылку с YouTube…"
+      autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+    <p class="note">Можно несколько ссылок сразу — каждую с новой строки.</p>
+    <button class="btn" id="next">Дальше</button>`);
+  const url = document.getElementById("url");
+  document.getElementById("next").onclick = () => handle(url.value.trim());
+  url.addEventListener("keydown", e => { if (e.key === "Enter") handle(url.value.trim()); });
+}
+
+function screenLoading(text){
+  setBar("", false);
+  show(`<h1>${esc(text)}</h1><div class="spin"></div>`);
+}
+
+function screenError(msg){
+  setBar("", false);
+  show(`<h1>Не получилось</h1><div class="err">${esc(msg)}</div>
+        <button class="btn" id="back">Назад</button>`);
+  document.getElementById("back").onclick = screenStart;
+}
+
+function langBlock(){
+  return `<div class="cap">Язык субтитров</div>
+    <div class="card"><div class="seg" id="lang">
+      <button data-l="auto" class="on">Авто</button>
+      <button data-l="ru">Русский</button>
+      <button data-l="en">Английский</button>
+    </div></div>
+    <p class="note">Авто — сначала ищем русские, если их нет, берём английские.</p>`;
+}
+function bindLang(){
+  document.getElementById("lang").onclick = e => {
+    const b = e.target.closest("button[data-l]"); if (!b) return;
+    lang = b.dataset.l;
+    [...b.parentNode.children].forEach(x => x.classList.toggle("on", x === b));
+  };
+}
+
+function screenSingle(v){
+  show(`<h1>Одно видео</h1><p class="sub">проверьте, что ссылка та</p>
+    <div class="cap">Найдено</div>
+    <div class="card"><div class="it">
+      <img src="https://i.ytimg.com/vi/${v.id}/mqdefault.jpg" alt="">
+      <div class="meta"><div class="nm">${esc(v.title)}</div><div class="dt">${esc(v.date)}</div></div>
+    </div></div>
+    ${langBlock()}`);
+  bindLang();
+  picked = new Set([v.id]);
+  setBar("Скачать субтитры", true);
+}
+
+function screenList(title, sub){
+  const vis = videos.filter(v => !filter || v.title.toLowerCase().includes(filter));
+  const rows = vis.map(v => `<div class="it" data-id="${v.id}">
+      <img src="https://i.ytimg.com/vi/${v.id}/mqdefault.jpg" alt="" loading="lazy">
+      <div class="meta"><div class="nm">${esc(v.title)}</div><div class="dt">${esc(v.date)}</div></div>
+      <div class="ck ${picked.has(v.id) ? "on" : ""}"></div>
+    </div>`).join("") || `<div class="it"><div class="meta"><div class="dt">Ничего не нашлось</div></div></div>`;
+
+  show(`<h1>${esc(title)}</h1><p class="sub">${esc(sub)}</p>
+    <div class="cap">Поиск по названию</div>
+    <div class="card"><input id="q" placeholder="Например: godot" value="${esc(filter)}"
+      autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+    <div class="cap">Выбрано: ${picked.size}</div>
+    <div class="tools">
+      <button id="all">Выбрать все</button>
+      <button id="none">Снять всё</button>
+    </div>
+    <div class="card" id="list">${rows}</div>`);
+
+  const q = document.getElementById("q");
+  q.oninput = () => { filter = q.value.trim().toLowerCase(); screenList(title, sub);
+                      const n = document.getElementById("q"); n.focus();
+                      n.setSelectionRange(n.value.length, n.value.length); };
+  document.getElementById("all").onclick  = () => { vis.forEach(v => picked.add(v.id)); screenList(title, sub); };
+  document.getElementById("none").onclick = () => { vis.forEach(v => picked.delete(v.id)); screenList(title, sub); };
+  document.getElementById("list").onclick = e => {
+    const row = e.target.closest(".it[data-id]"); if (!row) return;
+    const id = row.dataset.id;
+    picked.has(id) ? picked.delete(id) : picked.add(id);
+    row.querySelector(".ck").classList.toggle("on", picked.has(id));
+    document.querySelectorAll(".cap")[1].textContent = "Выбрано: " + picked.size;
+    setBar(`Скачать субтитры · ${picked.size}`, picked.size > 0);
+    tg?.HapticFeedback?.selectionChanged?.();
+  };
+  setBar(`Скачать субтитры · ${picked.size}`, picked.size > 0);
+}
+
+// ── Разбор того, что вставили ────────────────────────────────────
+async function handle(text){
+  if (!text) return;
+  const ids = videoIds(text);
+  const ch = channelRef(text);
+  try {
+    if (ids.length === 1 && !ch){
+      screenLoading("Читаю видео…");
+      const v = (await loadVideos(ids))[0];
+      if (!v) throw new Error("Видео не найдено");
+      screenSingle(v);
+    } else if (ids.length > 1){
+      screenLoading("Читаю видео…");
+      videos = await loadVideos(ids);
+      picked = new Set(videos.map(v => v.id));
+      screenList("Ваши ссылки", `${videos.length} видео`);
+    } else if (ch){
+      screenLoading("Читаю канал…");
+      const r = await loadChannel(ch);
+      videos = r.videos; picked = new Set();
+      screenList("Выберите видео", `${r.name} · ${videos.length} видео`);
+    } else {
+      screenError("Это не похоже на ссылку с YouTube. Нужна ссылка на видео или на канал.");
+    }
+  } catch(e){
+    screenError(e.message || String(e));
+  }
+}
+
+// ── Отправка боту ────────────────────────────────────────────────
+go.onclick = () => {
+  const ids = [...picked];
+  if (!ids.length) return;
+  // 4096 байт — предел Telegram. 11 символов на id плюс запятая: ~340 штук.
+  const payload = {v: 1, lang, ids: ids.slice(0, 330)};
+  tg?.HapticFeedback?.impactOccurred?.("medium");
+  if (tg?.sendData) tg.sendData(JSON.stringify(payload));
+  else alert("Открой это через кнопку в боте — только так он получит выбор.");
+};
+
+screenStart();
+</script>
