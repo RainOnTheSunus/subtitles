@@ -88,6 +88,7 @@ let picked = new Set();
 let lang = "auto";
 let filter = "";
 let kind = "video";   // video | short | stream | all
+let sourceName = "";  // канал или название видео — им назовём файл
 
 const KINDS = [["all","Все"],["video","Видео"],["short","Shorts"],["stream","Трансляции"]];
 
@@ -148,6 +149,7 @@ async function loadChannel(ref){
     page = r.nextPageToken; if (!page) break;
   }
   await addKinds(all);
+  sourceName = name;
   return {name, videos: all};
 }
 // Тип (видео / shorts / трансляция) в списке плейлиста не приходит —
@@ -188,7 +190,7 @@ async function loadVideos(ids){
 // ── Экраны ───────────────────────────────────────────────────────
 function screenStart(){
   setBar("", false); setBack(false);
-  picked = new Set(); videos = []; filter = ""; kind = "video";
+  picked = new Set(); videos = []; filter = ""; kind = "video"; sourceName = "";
   show(`<h1>Субтитры</h1>
     <div class="card"><input id="url" placeholder="Ссылка на видео или канал"
       autocapitalize="off" autocorrect="off" spellcheck="false"></div>
@@ -235,6 +237,7 @@ function screenSingle(v){
     </div></div>
     ${langBlock()}`);
   bindLang(); setBack(true);
+  sourceName = v.title;
   videos = [v];
   picked = new Set([v.id]);
   go.onclick = startDownload;
@@ -312,6 +315,7 @@ async function handle(text){
     } else if (ids.length > 1){
       screenLoading("Читаю видео…");
       videos = await loadVideos(ids);
+      sourceName = `${videos.length} видео`;
       picked = new Set(videos.map(v => v.id));
       screenList("Ваши ссылки", `${videos.length} видео`);
     } else if (ch){
@@ -389,7 +393,10 @@ function screenDone(st){
 }
 
 function fileName(){
-  return "Субтитры_" + new Date().toISOString().slice(0,10);
+  // Windows и Mac не любят эти символы в именах файлов.
+  const clean = (sourceName || "субтитры").replace(/[\\/:*?"<>|]/g, " ")
+                  .replace(/\s+/g, " ").trim().slice(0, 50);
+  return clean || "субтитры";
 }
 
 async function runJob(list){
