@@ -1,3 +1,5 @@
+<!-- Мини-приложение для бота @youtable_bot: выбор видео перед выгрузкой субтитров.
+     Список и превью берём прямо у YouTube, боту отдаём только выбор. -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Субтитры</title>
@@ -87,6 +89,7 @@ let lang = "auto";
 let filter = "";
 let kind = "video";   // video | short | stream | all
 let sourceName = "";  // канал или название видео — им назовём файл
+let shown = 200;      // сколько строк нарисовано: телефон не тянет тысячи разом
 
 const KINDS = [["all","Все"],["video","Видео"],["short","Shorts"],["stream","Трансляции"]];
 
@@ -133,9 +136,9 @@ async function loadChannel(ref){
   const name = ch.items[0].snippet.title;
   const uploads = ch.items[0].contentDetails.relatedPlaylists.uploads;
   const all = []; let page = "";
-  // 40 страниц по 50 — до 2000 видео. Больше почти не бывает,
-  // а квоты это стоит копейки: одна страница — одна единица из 10 000 в сутки.
-  for (let i = 0; i < 40; i++){
+  // 100 страниц по 50 — до 5000 видео. По квоте дёшево: 50 видео стоят
+  // 2 единицы из 10 000 в сутки, то есть 5000 видео — 200 единиц.
+  for (let i = 0; i < 100; i++){
     const r = await api("playlistItems", {part: "snippet", playlistId: uploads,
                                           maxResults: 50, pageToken: page});
     for (const it of r.items || []){
@@ -188,7 +191,7 @@ async function loadVideos(ids){
 // ── Экраны ───────────────────────────────────────────────────────
 function screenStart(){
   setBar("", false); setBack(false);
-  picked = new Set(); videos = []; filter = ""; kind = "video"; sourceName = "";
+  picked = new Set(); videos = []; filter = ""; kind = "video"; sourceName = ""; shown = 200;
   show(`<h1>Субтитры</h1>
     <div class="card"><input id="url" placeholder="Ссылка на видео или канал"
       autocapitalize="off" autocorrect="off" spellcheck="false"></div>
@@ -243,9 +246,10 @@ function screenSingle(v){
 }
 
 function screenList(title, sub){
-  const vis = videos.filter(v =>
+  const visAll = videos.filter(v =>
     (kind === "all" || v.kind === kind) &&
     (!filter || v.title.toLowerCase().includes(filter)));
+  const vis = visAll.slice(0, shown);
   const rows = vis.map(v => `<div class="it" data-id="${v.id}">
       <img src="https://i.ytimg.com/vi/${v.id}/mqdefault.jpg" alt="" loading="lazy">
       <div class="meta"><div class="nm">${esc(v.title)}</div>
@@ -257,7 +261,7 @@ function screenList(title, sub){
     <div class="card"><input id="q" placeholder="Поиск" value="${esc(filter)}"
       autocapitalize="off" autocorrect="off" spellcheck="false"></div>
     <div class="cap" id="cnt">${(() => {
-      const here = vis.filter(v => picked.has(v.id)).length;
+      const here = visAll.filter(v => picked.has(v.id)).length;
       return picked.size > here
         ? `Выбрано: ${picked.size} · на этой вкладке ${here}`
         : `Выбрано: ${picked.size}`;
@@ -270,17 +274,22 @@ function screenList(title, sub){
       <button id="all">Выбрать все</button>
       <button id="none">Снять всё</button>
     </div>
-    <div class="card" id="list">${rows}</div>`);
+    <div class="card" id="list">${rows}</div>
+    ${visAll.length > vis.length
+      ? `<button class="btn" id="more" style="background:var(--chip);color:var(--hint)">Показать ещё · осталось ${visAll.length - vis.length}</button>`
+      : ""}`);
 
   const q = document.getElementById("q");
-  q.oninput = () => { filter = q.value.trim().toLowerCase(); screenList(title, sub);
+  q.oninput = () => { filter = q.value.trim().toLowerCase(); shown = 200; screenList(title, sub);
                       const n = document.getElementById("q"); n.focus();
                       n.setSelectionRange(n.value.length, n.value.length); };
   document.getElementById("kinds")?.addEventListener("click", e => {
     const b = e.target.closest("button[data-k]"); if (!b) return;
-    kind = b.dataset.k; screenList(title, sub);
+    kind = b.dataset.k; shown = 200; screenList(title, sub);
   });
-  document.getElementById("all").onclick  = () => { vis.forEach(v => picked.add(v.id)); screenList(title, sub); };
+  document.getElementById("more")?.addEventListener("click", () => { shown += 200; screenList(title, sub); });
+  // «Выбрать все» берёт весь найденный список, а не только нарисованную часть.
+  document.getElementById("all").onclick  = () => { visAll.forEach(v => picked.add(v.id)); screenList(title, sub); };
   document.getElementById("none").onclick = () => { picked.clear(); screenList(title, sub); };
   document.getElementById("list").onclick = e => {
     const row = e.target.closest(".it[data-id]"); if (!row) return;
