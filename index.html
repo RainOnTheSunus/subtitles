@@ -67,6 +67,16 @@
   .fails{margin:26px 14px 0}
   .fails .h{color:var(--hint);font-size:12px;margin:0 0 6px 2px}
   .fails .card{padding:0}
+  .card.list{padding:0}
+  .card .row{display:flex;align-items:center;gap:12px;padding:13px 14px;
+             border-bottom:1px solid var(--sep)}
+  .card .row:last-child{border-bottom:none}
+  .card .txt{flex:1;min-width:0}
+  .card .t1{font-size:14px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card .t2{color:var(--hint);font-size:12px;margin-top:3px}
+  .card .arw{color:var(--hint);font-size:19px;line-height:1;opacity:.6}
+  .card.link .row{padding:14px}
+  .card.link span:first-child{font-size:14px;flex:1}
   .hide{display:none}
 </style>
 
@@ -195,10 +205,50 @@ function screenStart(){
   show(`<h1>Субтитры</h1>
     <div class="card"><input id="url" placeholder="Ссылка на видео или канал"
       autocapitalize="off" autocorrect="off" spellcheck="false"></div>
-    <button class="btn" id="next">Дальше</button>`);
+    <button class="btn" id="next">Дальше</button>
+    <div class="card link" id="hist" style="margin-top:22px">
+      <div class="row"><span>История выгрузок</span><span class="arw">›</span></div>
+    </div>`);
   const url = document.getElementById("url");
   document.getElementById("next").onclick = () => handle(url.value.trim());
+  document.getElementById("hist").onclick = screenHistory;
   url.addEventListener("keydown", e => { if (e.key === "Enter") handle(url.value.trim()); });
+}
+
+function human(n){
+  return n > 1048576 ? (n/1048576).toFixed(1) + " МБ" : Math.max(1, Math.round(n/1024)) + " КБ";
+}
+
+async function screenHistory(){
+  setBar("", false); setBack(true);
+  show(`<h1>История</h1><div class="spin"></div>`);
+  let items = [];
+  try {
+    if (!API) throw new Error("нет связи");
+    items = (await (await fetch(`${API}/history`)).json()).items || [];
+  } catch(e){
+    return screenError("Не достучался до бота. Отправьте /start и откройте заново.");
+  }
+  if (!items.length){
+    return show(`<h1>История</h1>
+      <div class="card list"><div class="row"><div class="txt">
+        <div class="t2">Пока пусто</div></div></div></div>`);
+  }
+  show(`<h1>История</h1>
+    <div class="card list" id="hlist">${items.map(r => `<div class="row" data-id="${esc(r.id)}" data-name="${esc(r.name)}">
+      <div class="txt"><div class="t1">${esc(r.name)}</div>
+        <div class="t2">${esc(r.date)} · ${r.videos} видео · ${human(r.size)}</div></div>
+      <span class="arw">›</span>
+    </div>`).join("")}</div>`);
+  document.getElementById("hlist").onclick = e => {
+    const row = e.target.closest(".it[data-id]"); if (!row) return;
+    const nm = row.dataset.name || "Субтитры";
+    const url = `${API}/file?job=${row.dataset.id}&name=${encodeURIComponent(nm)}`;
+    tg?.HapticFeedback?.impactOccurred?.("light");
+    if (tg?.downloadFile) tg.downloadFile({url, file_name: nm + ".txt"});
+    else if (tg?.openLink) tg.openLink(url);
+    else location.href = url;
+  };
 }
 
 function screenLoading(text){
@@ -411,7 +461,7 @@ async function runJob(list){
   try {
     const r = await fetch(`${API}/start`, {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({lang, videos: list.map(v => ({id: v.id, title: v.title}))}),
+      body: JSON.stringify({lang, name: fileName(), videos: list.map(v => ({id: v.id, title: v.title}))}),
     });
     const j = await r.json();
     if (!j.job) throw new Error(j.error || "бот не принял задачу");
