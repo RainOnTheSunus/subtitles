@@ -234,6 +234,7 @@ async function screenHistory(){
       <div class="card list"><div class="row"><div class="txt">
         <div class="t2">Пока пусто</div></div></div></div>`);
   }
+  setBar("", false);
   show(`<h1>История</h1>
     <div class="card list" id="hlist">${items.map(r => `<div class="row" data-id="${esc(r.id)}" data-name="${esc(r.name)}">
       <div class="txt"><div class="t1">${esc(r.name)}</div>
@@ -241,13 +242,37 @@ async function screenHistory(){
       <span class="arw">›</span>
     </div>`).join("")}</div>`);
   document.getElementById("hlist").onclick = e => {
-    const row = e.target.closest(".it[data-id]"); if (!row) return;
-    const nm = row.dataset.name || "Субтитры";
-    const url = `${API}/file?job=${row.dataset.id}&name=${encodeURIComponent(nm)}`;
-    tg?.HapticFeedback?.impactOccurred?.("light");
-    if (tg?.downloadFile) tg.downloadFile({url, file_name: nm + ".txt"});
+    const row = e.target.closest("[data-id]"); if (!row) return;
+    const rec = items.find(x => x.id === row.dataset.id);
+    if (rec) screenExport(rec);
+  };
+}
+
+function screenExport(rec){
+  setBack(true);
+  show(`<h1>${esc(rec.name)}</h1>
+    <div class="cap">Выгрузка</div>
+    <div class="card list">
+      <div class="row"><div class="txt"><div class="t2">Когда</div></div><span>${esc(rec.date)}</span></div>
+      <div class="row"><div class="txt"><div class="t2">Видео с субтитрами</div></div><span>${rec.videos}</span></div>
+      ${rec.fail ? `<div class="row"><div class="txt"><div class="t2">Без субтитров</div></div><span>${rec.fail}</span></div>` : ""}
+      <div class="row"><div class="txt"><div class="t2">Размер</div></div><span>${human(rec.size)}</span></div>
+    </div>
+    <div class="card link" id="del" style="margin-top:18px">
+      <div class="row"><span style="color:#ff6b60">Удалить из истории</span></div>
+    </div>`);
+
+  setBar("Скачать файл", true);
+  go.onclick = () => {
+    const url = `${API}/file?job=${rec.id}&name=${encodeURIComponent(rec.name)}`;
+    tg?.HapticFeedback?.impactOccurred?.("medium");
+    if (tg?.downloadFile) tg.downloadFile({url, file_name: rec.name + ".txt"});
     else if (tg?.openLink) tg.openLink(url);
     else location.href = url;
+  };
+  document.getElementById("del").onclick = async () => {
+    try { await fetch(`${API}/forget?job=${rec.id}`); } catch(e){}
+    screenHistory();
   };
 }
 
