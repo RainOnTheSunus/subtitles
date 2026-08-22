@@ -1,3 +1,5 @@
+<!-- Мини-приложение для бота @youtable_bot: выбор видео перед выгрузкой субтитров.
+     Список и превью берём прямо у YouTube, боту отдаём только выбор. -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Субтитры</title>
@@ -83,6 +85,7 @@
 
 <script>
 const KEY = "AIzaSyCbyV0XHj7wqp2-Ls7iuHrSfDFWCpKQHaU";
+const VER = "v7";
 const API = new URLSearchParams(location.search).get("api") || "";
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
@@ -206,7 +209,9 @@ function screenStart(){
     <button class="btn" id="next">Дальше</button>
     <div class="card link" id="hist" style="margin-top:22px">
       <div class="row"><span>История выгрузок</span><span class="arw">›</span></div>
-    </div>`);
+    </div>
+    <p class="note" style="text-align:center;margin-top:18px;opacity:.5">
+      ${VER}${API ? "" : " · бот недоступен"}</p>`);
   const url = document.getElementById("url");
   document.getElementById("next").onclick = () => handle(url.value.trim());
   document.getElementById("hist").onclick = screenHistory;
@@ -225,7 +230,8 @@ async function screenHistory(){
     if (!API) throw new Error("нет связи");
     items = (await (await fetch(`${API}/history`)).json()).items || [];
   } catch(e){
-    return screenError("Не достучался до бота. Отправьте /start и откройте заново.");
+    return screenError("Бот не отвечает.\n\nАдрес меняется при каждом запуске компьютера. "
+      + "Закройте окно, отправьте боту /start и откройте кнопкой из нового сообщения.");
   }
   if (!items.length){
     return show(`<h1>История</h1>
@@ -256,9 +262,7 @@ function screenExport(rec){
       ${rec.fail ? `<div class="row"><div class="txt"><div class="t2">Без субтитров</div></div><span>${rec.fail}</span></div>` : ""}
       <div class="row"><div class="txt"><div class="t2">Размер</div></div><span>${human(rec.size)}</span></div>
     </div>
-    <div class="card link" id="del" style="margin-top:18px">
-      <div class="row"><span style="color:#ff6b60">Удалить из истории</span></div>
-    </div>`);
+`);
 
   setBar("Скачать файл", true);
   go.onclick = () => {
@@ -267,10 +271,6 @@ function screenExport(rec){
     if (tg?.downloadFile) tg.downloadFile({url, file_name: rec.name + ".txt"});
     else if (tg?.openLink) tg.openLink(url);
     else location.href = url;
-  };
-  document.getElementById("del").onclick = async () => {
-    try { await fetch(`${API}/forget?job=${rec.id}`); } catch(e){}
-    screenHistory();
   };
 }
 
