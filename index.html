@@ -1,4 +1,9 @@
+<!-- Мини-приложение для бота @youtable_bot: выбор видео перед выгрузкой субтитров.
+     Список и превью берём прямо у YouTube, боту отдаём только выбор. -->
 <meta charset="utf-8">
+<!-- Ключ доступа к боту лежит в адресе страницы. Без этой строки браузер мог бы
+     отправить полный адрес вместе с ключом в заголовке Referer на youtube. -->
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Субтитры</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -83,8 +88,11 @@
 
 <script>
 const KEY = "AIzaSyCbyV0XHj7wqp2-Ls7iuHrSfDFWCpKQHaU";
-const VER = "v7";
+const VER = "v8";
 const API = new URLSearchParams(location.search).get("api") || "";
+// Ключ доступа к серверу бота: сервер торчит в интернет через туннель, и без
+// ключа скачать чужие выгрузки мог любой, кто узнал адрес.
+const KQ  = "k=" + encodeURIComponent(new URLSearchParams(location.search).get("k") || "");
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
 
@@ -226,7 +234,7 @@ async function screenHistory(){
   let items = [];
   try {
     if (!API) throw new Error("нет связи");
-    items = (await (await fetch(`${API}/history`)).json()).items || [];
+    items = (await (await fetch(`${API}/history?${KQ}`)).json()).items || [];
   } catch(e){
     return screenError("Бот не отвечает.\n\nАдрес меняется при каждом запуске компьютера. "
       + "Закройте окно, отправьте боту /start и откройте кнопкой из нового сообщения.");
@@ -264,7 +272,7 @@ function screenExport(rec){
 
   setBar("Скачать файл", true);
   go.onclick = () => {
-    const url = `${API}/file?job=${rec.id}&name=${encodeURIComponent(rec.name)}`;
+    const url = `${API}/file?job=${rec.id}&name=${encodeURIComponent(rec.name)}&${KQ}`;
     tg?.HapticFeedback?.impactOccurred?.("medium");
     if (tg?.downloadFile) tg.downloadFile({url, file_name: rec.name + ".txt"});
     else if (tg?.openLink) tg.openLink(url);
@@ -439,7 +447,7 @@ function screenProgress(st){
     <button class="btn" id="stop" style="background:var(--chip);color:var(--hint)">Остановить</button>
     </div>`);
   document.getElementById("stop").onclick = async () => {
-    try { await fetch(`${API}/stop?job=${jobId}`); } catch(e){}
+    try { await fetch(`${API}/stop?job=${jobId}&${KQ}`); } catch(e){}
   };
 }
 
@@ -463,7 +471,7 @@ function screenDone(st){
     </div>` : ""}</div>`);
   setBar("Забрать субтитры", st.ok > 0);
   go.onclick = () => {
-    const url = `${API}/file?job=${jobId}&name=${encodeURIComponent(fileName())}`;
+    const url = `${API}/file?job=${jobId}&name=${encodeURIComponent(fileName())}&${KQ}`;
     if (tg?.downloadFile) tg.downloadFile({url, file_name: fileName() + ".txt"});
     else if (tg?.openLink) tg.openLink(url);
     else location.href = url;
@@ -480,7 +488,7 @@ function fileName(){
 async function runJob(list){
   screenProgress({done: 0, total: list.length, ok: 0, fail: 0});
   try {
-    const r = await fetch(`${API}/start`, {
+    const r = await fetch(`${API}/start?${KQ}`, {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({lang, name: fileName(), videos: list.map(v => ({id: v.id, title: v.title}))}),
     });
@@ -493,7 +501,7 @@ async function runJob(list){
   clearInterval(poller);
   poller = setInterval(async () => {
     try {
-      const st = await (await fetch(`${API}/status?job=${jobId}`)).json();
+      const st = await (await fetch(`${API}/status?job=${jobId}&${KQ}`)).json();
       if (st.error) throw new Error(st.error);
       st.ready ? (clearInterval(poller), screenDone(st)) : screenProgress(st);
     } catch(e){
