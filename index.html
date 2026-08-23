@@ -1,3 +1,5 @@
+<!-- Мини-приложение для бота @youtable_bot: выбор видео перед выгрузкой субтитров.
+     Список и превью берём прямо у YouTube, боту отдаём только выбор. -->
 <meta charset="utf-8">
 <!-- Ключ доступа к боту лежит в адресе страницы. Без этой строки браузер мог бы
      отправить полный адрес вместе с ключом в заголовке Referer на youtube. -->
@@ -86,11 +88,14 @@
 
 <script>
 const KEY = "AIzaSyCbyV0XHj7wqp2-Ls7iuHrSfDFWCpKQHaU";
-const VER = "v8";
+const VER = "v9";
 const API = new URLSearchParams(location.search).get("api") || "";
 // Ключ доступа к серверу бота: сервер торчит в интернет через туннель, и без
 // ключа скачать чужие выгрузки мог любой, кто узнал адрес.
-const KQ  = "k=" + encodeURIComponent(new URLSearchParams(location.search).get("k") || "");
+// Ключ доступа и id владельца: по владельцу сервер отдаёт в истории только
+// его выгрузки, чтобы Ярик и папа не видели скачивания друг друга.
+const KQ  = "k=" + encodeURIComponent(new URLSearchParams(location.search).get("k") || "")
+          + "&u=" + encodeURIComponent(new URLSearchParams(location.search).get("u") || "");
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
 
