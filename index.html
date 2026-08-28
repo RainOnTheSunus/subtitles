@@ -84,7 +84,7 @@
 
 <script>
 const KEY = "AIzaSyCbyV0XHj7wqp2-Ls7iuHrSfDFWCpKQHaU";
-const VER = "v10";
+const VER = "v11";
 const API = new URLSearchParams(location.search).get("api") || "";
 // Ключ доступа к серверу бота: сервер торчит в интернет через туннель, и без
 // ключа скачать чужие выгрузки мог любой, кто узнал адрес.
@@ -107,9 +107,8 @@ let kind = "video";   // video | short | stream | all
 let sourceName = "";  // канал или название видео — им назовём файл
 let shown = 200;      // сколько строк нарисовано: телефон не тянет тысячи разом
 
-let playlists = [];        // [{id, title, ids:[videoId]}]
+let playlists = [];        // [{id, title, count, thumb, ids:[videoId]}]
 let plPicked  = new Set(); // отмеченные плейлисты
-let inPlaylist = new Set();// все видео, лежащие хоть в одном плейлисте канала
 
 const KINDS = [["all","Все"],["video","Видео"],["short","Shorts"],
                ["stream","Трансляции"],["pl","Плейлисты"]];
@@ -150,9 +149,8 @@ async function api(path, params){
   if (j.error) throw new Error(j.error.message || "YouTube отказал");
   return j;
 }
-// Плейлисты канала и их состав. Нужны для двух вещей: показать вкладку
-// «Плейлисты» и убрать эти видео из остальных вкладок, чтобы одно и то же
-// не скачивалось дважды.
+// Список плейлистов канала. Состав каждого не читаем — это десятки лишних
+// запросов и долгая загрузка; видео плейлиста подтягиваем, когда его отметят.
 async function loadPlaylists(channelId){
   const out = []; let page = "";
   for (let i = 0; i < 10; i++){                       // до 500 плейлистов
@@ -160,22 +158,27 @@ async function loadPlaylists(channelId){
                                       channelId, maxResults: 50, pageToken: page});
     for (const it of r.items || []){
       if (!it.contentDetails?.itemCount) continue;    // пустые не показываем
-      out.push({id: it.id, title: it.snippet.title, ids: []});
+      out.push({id: it.id, title: it.snippet.title,
+                count: it.contentDetails.itemCount,
+                thumb: it.snippet.thumbnails?.medium?.url || "",
+                ids: []});
     }
     page = r.nextPageToken; if (!page) break;
   }
-  for (let i = 0; i < out.length; i++){
-    screenLoading(`Читаю плейлисты… ${i + 1} из ${out.length}`);
-    let pg = "";
-    for (let n = 0; n < 20; n++){                     // до 1000 видео в плейлисте
-      const r = await api("playlistItems", {part: "contentDetails", playlistId: out[i].id,
-                                            maxResults: 50, pageToken: pg});
-      for (const it of r.items || [])
-        if (it.contentDetails?.videoId) out[i].ids.push(it.contentDetails.videoId);
-      pg = r.nextPageToken; if (!pg) break;
-    }
+  return out;
+}
+
+async function loadPlaylistItems(pl){
+  if (pl.ids.length) return pl.ids;
+  let page = "";
+  for (let i = 0; i < 40; i++){                       // до 2000 видео в плейлисте
+    const r = await api("playlistItems", {part: "contentDetails", playlistId: pl.id,
+                                          maxResults: 50, pageToken: page});
+    for (const it of r.items || [])
+      if (it.contentDetails?.videoId) pl.ids.push(it.contentDetails.videoId);
+    page = r.nextPageToken; if (!page) break;
   }
-  return out.filter(p => p.ids.length);
+  return pl.ids;
 }
 
 async function loadChannel(ref){
@@ -204,10 +207,6 @@ async function loadChannel(ref){
   } catch(e){
     playlists = [];                                   // квота кончилась — просто без плейлистов
   }
-  inPlaylist = new Set();
-  const known = new Set(all.map(v => v.id));
-  for (const pl of playlists)
-    for (const id of pl.ids) if (known.has(id)) inPlaylist.add(id);
   sourceName = name;
   return {name, videos: all};
 }
@@ -250,7 +249,7 @@ async function loadVideos(ids){
 function screenStart(){
   setBar("", false); setBack(false);
   picked = new Set(); videos = []; filter = ""; kind = "video"; sourceName = ""; shown = 200;
-  playlists = []; plPicked = new Set(); inPlaylist = new Set();
+  playlists = []; plPicked = new Set();
   show(`<h1>Субтитры</h1>
     <div class="card"><input id="url" placeholder="Ссылка на видео или канал"
       autocapitalize="off" autocorrect="off" spellcheck="false"></div>
@@ -368,20 +367,19 @@ function screenSingle(v){
 
 function screenList(title, sub){
   const plMode = kind === "pl";
-  // На вкладках с видео прячем то, что уже лежит в плейлистах: эти видео
-  // качаются через вкладку «Плейлисты», иначе попали бы в файл дважды.
+  // Вкладки с видео показывают всё, что есть на канале. Плейлисты — просто
+  // другой способ выбрать те же видео, поэтому ничего отсюда не вычитаем.
   const visAll = plMode
     ? playlists.filter(p => !filter || p.title.toLowerCase().includes(filter))
     : videos.filter(v =>
-        !inPlaylist.has(v.id) &&
         (kind === "all" || v.kind === kind) &&
         (!filter || v.title.toLowerCase().includes(filter)));
   const vis = visAll.slice(0, shown);
   const rows = (plMode
     ? vis.map(p => `<div class="it" data-pl="${esc(p.id)}">
-        <img src="https://i.ytimg.com/vi/${p.ids[0]}/mqdefault.jpg" alt="" loading="lazy">
+        <img src="${esc(p.thumb)}" alt="" loading="lazy">
         <div class="meta"><div class="nm">${esc(p.title)}</div>
-          <div class="dt">${p.ids.length} видео</div></div>
+          <div class="dt">${p.ids.length || p.count} видео</div></div>
         <div class="ck ${plPicked.has(p.id) ? "on" : ""}"></div>
       </div>`)
     : vis.map(v => `<div class="it" data-id="${v.id}">
@@ -409,7 +407,7 @@ function screenList(title, sub){
         if (k[0] === "pl" && !playlists.length) return "";
         const n = k[0] === "all" ? ""
                 : k[0] === "pl" ? ` ${playlists.length}`
-                : ` ${videos.filter(v => v.kind === k[0] && !inPlaylist.has(v.id)).length}`;
+                : ` ${videos.filter(v => v.kind === k[0]).length}`;
         return `<button data-k="${k[0]}" class="${kind === k[0] ? "on" : ""}">${k[1]}${n}</button>`;
       }).join("")}
     </div>
@@ -432,19 +430,35 @@ function screenList(title, sub){
   });
   document.getElementById("more")?.addEventListener("click", () => { shown += 200; screenList(title, sub); });
   // «Выбрать все» берёт весь найденный список, а не только нарисованную часть.
-  document.getElementById("all").onclick  = () => {
-    if (plMode) visAll.forEach(p => { plPicked.add(p.id); p.ids.forEach(id => picked.add(id)); });
-    else visAll.forEach(v => picked.add(v.id));
+  document.getElementById("all").onclick  = async () => {
+    if (plMode){
+      // состав плейлистов читаем только сейчас, по одному, с отсчётом
+      for (let i = 0; i < visAll.length; i++){
+        const p = visAll[i];
+        if (!p.ids.length){
+          setBar(`Читаю плейлисты… ${i + 1} из ${visAll.length}`, false);
+          try { await loadPlaylistItems(p); } catch(e){ break; }
+        }
+        plPicked.add(p.id); p.ids.forEach(id => picked.add(id));
+      }
+    } else visAll.forEach(v => picked.add(v.id));
     screenList(title, sub);
   };
   document.getElementById("none").onclick = () => {
     picked.clear(); if (plMode) plPicked.clear();
     screenList(title, sub);
   };
-  document.getElementById("list").onclick = e => {
+  document.getElementById("list").onclick = async e => {
     const row = e.target.closest(".it[data-id], .it[data-pl]"); if (!row) return;
     if (row.dataset.pl){
       const p = playlists.find(x => x.id === row.dataset.pl); if (!p) return;
+      if (!plPicked.has(p.id) && !p.ids.length){
+        const dt = row.querySelector(".dt");
+        dt.textContent = "читаю…";
+        try { await loadPlaylistItems(p); }
+        catch(err){ dt.textContent = `${p.count} видео`; return; }
+        dt.textContent = `${p.ids.length} видео`;
+      }
       if (plPicked.has(p.id)){
         plPicked.delete(p.id);
         // видео может лежать в двух плейлистах — снимаем только то,
@@ -498,9 +512,8 @@ async function handle(text){
       screenLoading("Читаю канал…");
       const r = await loadChannel(ch);
       videos = r.videos; picked = new Set();
-      const free = videos.length - inPlaylist.size;
-      screenList("Выберите видео", inPlaylist.size
-        ? `${r.name} · ${free} вне плейлистов, ${inPlaylist.size} в плейлистах`
+      screenList("Выберите видео", playlists.length
+        ? `${r.name} · ${videos.length} видео · ${playlists.length} плейлистов`
         : `${r.name} · ${videos.length} видео`);
     } else {
       screenError("Это не похоже на ссылку с YouTube. Нужна ссылка на видео или на канал.");
