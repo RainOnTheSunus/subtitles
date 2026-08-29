@@ -84,7 +84,7 @@
 
 <script>
 const KEY = "AIzaSyCbyV0XHj7wqp2-Ls7iuHrSfDFWCpKQHaU";
-const VER = "v12";
+const VER = "v13";
 const API = new URLSearchParams(location.search).get("api") || "";
 // Ключ доступа к серверу бота: сервер торчит в интернет через туннель, и без
 // ключа скачать чужие выгрузки мог любой, кто узнал адрес.
@@ -106,12 +106,14 @@ let filter = "";
 let kind = "video";   // video | short | stream | all
 let sourceName = "";  // канал или название видео — им назовём файл
 let shown = 200;      // сколько строк нарисовано: телефон не тянет тысячи разом
+let fmt = "plain";    // plain | time | srt — в каком виде собрать файл
 
 let playlists = [];        // [{id, title, count, thumb, ids:[videoId]}]
 let plPicked  = new Set(); // отмеченные плейлисты
 
 const KINDS = [["all","Все"],["video","Видео"],["short","Shorts"],
                ["stream","Трансляции"],["pl","Плейлисты"]];
+const FORMATS = [["plain","Текст"],["time","С таймкодами"],["srt","SRT"]];
 
 const esc = s => String(s).replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
 const show = html => { app.innerHTML = html; };
@@ -249,7 +251,7 @@ async function loadVideos(ids){
 function screenStart(){
   setBar("", false); setBack(false);
   picked = new Set(); videos = []; filter = ""; kind = "video"; sourceName = ""; shown = 200;
-  playlists = []; plPicked = new Set();
+  playlists = []; plPicked = new Set(); fmt = "plain";
   show(`<h1>Субтитры</h1>
     <div class="card"><input id="url" placeholder="Ссылка на видео или канал"
       autocapitalize="off" autocorrect="off" spellcheck="false"></div>
@@ -484,6 +486,10 @@ function screenList(title, sub){
       <button id="all">Выбрать все</button>
       <button id="none">Снять всё</button>
     </div>
+    <div class="cap">Формат файла</div>
+    <div class="tools" id="fmts">
+      ${FORMATS.map(f => `<button data-f="${f[0]}" class="${fmt === f[0] ? "on" : ""}">${f[1]}</button>`).join("")}
+    </div>
     <div class="card" id="list">${rows}</div>
     ${visAll.length > vis.length
       ? `<button class="btn" id="more" style="background:var(--chip);color:var(--hint)">Показать ещё · осталось ${visAll.length - vis.length}</button>`
@@ -498,6 +504,11 @@ function screenList(title, sub){
     kind = b.dataset.k; shown = 200; screenList(title, sub);
   });
   document.getElementById("more")?.addEventListener("click", () => { shown += 200; screenList(title, sub); });
+  document.getElementById("fmts")?.addEventListener("click", e => {
+    const b = e.target.closest("button[data-f]"); if (!b) return;
+    fmt = b.dataset.f;
+    [...b.parentNode.children].forEach(x => x.classList.toggle("on", x === b));
+  });
   // «Выбрать все» берёт весь найденный список, а не только нарисованную часть.
   document.getElementById("all").onclick  = async () => {
     if (plMode){
@@ -600,7 +611,7 @@ function startDownload(){
   tg?.HapticFeedback?.impactOccurred?.("medium");
   if (API) return runJob(list);
   // Запасной путь: бот недоступен — отдаём выбор через Telegram и закрываемся.
-  if (tg?.sendData) tg.sendData(JSON.stringify({v: 1, lang, ids: list.map(v => v.id).slice(0, 330)}));
+  if (tg?.sendData) tg.sendData(JSON.stringify({v: 1, lang, fmt, ids: list.map(v => v.id).slice(0, 330)}));
   else screenError("Бот сейчас недоступен. Похоже, компьютер выключен.");
 }
 go.onclick = startDownload;
@@ -665,7 +676,7 @@ async function runJob(list){
   try {
     const r = await fetch(`${API}/start?${KQ}`, {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({lang, name: fileName(), videos: list.map(v => ({id: v.id, title: v.title}))}),
+      body: JSON.stringify({lang, fmt, name: fileName(), videos: list.map(v => ({id: v.id, title: v.title}))}),
     });
     const j = await r.json();
     if (!j.job) throw new Error(j.error || "бот не принял задачу");
