@@ -84,7 +84,7 @@
 
 <script>
 const KEY = "AIzaSyCbyV0XHj7wqp2-Ls7iuHrSfDFWCpKQHaU";
-const VER = "v11";
+const VER = "v12";
 const API = new URLSearchParams(location.search).get("api") || "";
 // Ключ доступа к серверу бота: сервер торчит в интернет через туннель, и без
 // ключа скачать чужие выгрузки мог любой, кто узнал адрес.
@@ -254,7 +254,10 @@ function screenStart(){
     <div class="card"><input id="url" placeholder="Ссылка на видео или канал"
       autocapitalize="off" autocorrect="off" spellcheck="false"></div>
     <button class="btn" id="next">Дальше</button>
-    <div class="card link" id="hist" style="margin-top:22px">
+    <div class="card link" id="find" style="margin-top:22px">
+      <div class="row"><span>Поиск по архиву</span><span class="arw">›</span></div>
+    </div>
+    <div class="card link" id="hist" style="margin-top:10px">
       <div class="row"><span>История выгрузок</span><span class="arw">›</span></div>
     </div>
     <p class="note" style="text-align:center;margin-top:18px;opacity:.5">
@@ -262,11 +265,77 @@ function screenStart(){
   const url = document.getElementById("url");
   document.getElementById("next").onclick = () => handle(url.value.trim());
   document.getElementById("hist").onclick = screenHistory;
+  document.getElementById("find").onclick = screenSearch;
   url.addEventListener("keydown", e => { if (e.key === "Enter") handle(url.value.trim()); });
 }
 
 function human(n){
   return n > 1048576 ? (n/1048576).toFixed(1) + " МБ" : Math.max(1, Math.round(n/1024)) + " КБ";
+}
+
+function fmtTime(s){
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = Math.floor(s % 60);
+  return h ? `${h}:${String(m).padStart(2,"0")}:${String(x).padStart(2,"0")}`
+           : `${m}:${String(x).padStart(2,"0")}`;
+}
+
+// Поиск по всем скачанным субтитрам. Находка открывает видео на нужной секунде,
+// если у неё есть таймкод: у старых выгрузок его нет, они качались до этой версии.
+async function screenSearch(){
+  setBar("", false); setBack(true);
+  show(`<h1>Поиск</h1>
+    <p class="sub">по всем скачанным субтитрам</p>
+    <div class="card"><input id="sq" placeholder="Слово или фраза"
+      autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+    <div class="cap" id="sinfo">Введите хотя бы два символа</div>
+    <div id="sres"></div>`);
+
+  const inp = document.getElementById("sq");
+  const info = document.getElementById("sinfo");
+  const res = document.getElementById("sres");
+  inp.focus();
+
+  if (API) {
+    try {
+      const st = (await (await fetch(`${API}/search?q=&${KQ}`)).json()).stats || {};
+      if (st.videos) info.textContent = `В архиве ${st.videos} видео`;
+    } catch(e){}
+  }
+
+  let timer = null, seq = 0;
+  const run = async () => {
+    const term = inp.value.trim();
+    if (term.length < 2){ res.innerHTML = ""; return; }
+    const my = ++seq;
+    info.textContent = "Ищу…";
+    let data;
+    try {
+      data = await (await fetch(`${API}/search?q=${encodeURIComponent(term)}&${KQ}`)).json();
+    } catch(e){
+      return screenError("Бот не отвечает.\n\nЗакройте окно, отправьте боту /start и откройте кнопкой из нового сообщения.");
+    }
+    if (my !== seq) return;            // пришёл ответ на устаревший запрос
+    const items = data.items || [];
+    info.textContent = items.length ? `Нашёл в ${items.length} видео` : "Ничего не нашлось";
+    res.innerHTML = items.map(v => `
+      <div class="cap">${esc(v.title)}</div>
+      <div class="card list">${v.hits.map(h => `
+        <div class="row" data-open="${esc(v.id)}" data-sec="${h.sec === null ? "" : h.sec}">
+          <div class="txt"><div class="t1">${esc(h.text)}</div>
+            <div class="t2">${h.sec === null ? "без таймкода" : fmtTime(h.sec)}</div></div>
+          <span class="arw">›</span>
+        </div>`).join("")}</div>`).join("");
+  };
+
+  inp.oninput = () => { clearTimeout(timer); timer = setTimeout(run, 350); };
+  inp.addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(timer); run(); } });
+  res.onclick = e => {
+    const row = e.target.closest("[data-open]"); if (!row) return;
+    const sec = row.dataset.sec;
+    const url = `https://www.youtube.com/watch?v=${row.dataset.open}` + (sec ? `&t=${sec}` : "");
+    tg?.HapticFeedback?.selectionChanged?.();
+    if (tg?.openLink) tg.openLink(url); else window.open(url, "_blank");
+  };
 }
 
 async function screenHistory(){
