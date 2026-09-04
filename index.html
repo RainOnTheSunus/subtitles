@@ -84,7 +84,7 @@
 
 <script>
 const KEY = "AIzaSyCbyV0XHj7wqp2-Ls7iuHrSfDFWCpKQHaU";
-const VER = "v13";
+const VER = "v14";
 const API = new URLSearchParams(location.search).get("api") || "";
 // Ключ доступа к серверу бота: сервер торчит в интернет через туннель, и без
 // ключа скачать чужие выгрузки мог любой, кто узнал адрес.
@@ -650,6 +650,7 @@ function screenDone(st){
     </div>
     ${st.no_subs?.length ? `<div class="fails">
       <p class="h">Без субтитров${st.fail > st.no_subs.length ? ` (первые ${st.no_subs.length} из ${st.fail})` : ""}</p>
+      <p class="h" style="opacity:.6;font-weight:400">Бывает, что дорожки есть, но YouTube ограничил запросы. Попробуйте эти видео через 5 минут.</p>
       <div class="card">${st.no_subs.map(v => `<div class="it">
         <img src="https://i.ytimg.com/vi/${esc(v.id || v)}/mqdefault.jpg" alt="" loading="lazy">
         <div class="meta"><div class="nm">${esc(v.title || v)}</div></div>
